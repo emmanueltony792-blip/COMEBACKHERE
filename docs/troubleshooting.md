@@ -166,3 +166,41 @@ Or remap the Docker Redis port as shown above.
 - **Check service health**: `docker compose ps` shows healthcheck status for each service
 - **Verify RPC is responding**: `curl http://localhost:8000/health`
 - **Verify Redis is responding**: `docker compose exec redis redis-cli ping` (should return `PONG`)
+
+## Request Tracing with Correlation IDs
+
+Every request handled by `comebackhere-backend` carries a unique `X-Request-Id`
+header that is echoed back on the response. This ID is the primary key for
+tracing a single request across backend logs, the treasury indexer, and webhook
+delivery.
+
+### How it works
+
+- If your client already sets an `X-Request-Id` header the backend preserves
+  that value unchanged.
+- Otherwise the backend generates a new UUID v4 and attaches it to both the
+  request context (`res.locals.requestId`) and the response header.
+
+### Filtering logs by correlation ID
+
+Capture the ID from a response and grep backend logs:
+
+```sh
+# Store the ID from a curl call
+REQUEST_ID=$(curl -si http://localhost:3000/invoices/1 | grep -i x-request-id | awk '{print $2}' | tr -d '\r')
+echo "Tracing request: $REQUEST_ID"
+
+# Filter Docker logs
+docker compose logs backend 2>&1 | grep "$REQUEST_ID"
+```
+
+### Supplying your own trace ID
+
+Pass an existing trace ID from your client or a distributed tracing system:
+
+```sh
+curl -H "X-Request-Id: my-trace-id-abc123" http://localhost:3000/invoices/1
+```
+
+The response will echo the same `X-Request-Id: my-trace-id-abc123` header,
+confirming the backend used your ID throughout the request lifecycle.

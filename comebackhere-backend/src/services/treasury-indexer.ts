@@ -46,19 +46,37 @@ async function saveCursor(
   database: Awaited<ReturnType<typeof connectMongo>>,
   pagingToken: string | null,
   lastLedger: number,
+  newEventIds: string[] = [],
 ) {
   const cursors = getCursorsCollection(database)
-  await cursors.updateOne(
-    { _id: CURSOR_ID },
-    {
-      $set: {
-        paging_token: pagingToken,
-        last_ledger: lastLedger,
-        updated_at: new Date(),
+  const update: Record<string, unknown> = {
+    paging_token: pagingToken,
+    last_ledger: lastLedger,
+    updated_at: new Date(),
+  }
+
+  if (newEventIds.length > 0) {
+    await cursors.updateOne(
+      { _id: CURSOR_ID },
+      {
+        $set: update,
+        // Keep only the most recent 1 000 event IDs to bound document size
+        $push: {
+          processed_event_ids: {
+            $each: newEventIds,
+            $slice: -1000,
+          },
+        } as any,
       },
-    },
-    { upsert: true },
-  )
+      { upsert: true },
+    )
+  } else {
+    await cursors.updateOne(
+      { _id: CURSOR_ID },
+      { $set: update },
+      { upsert: true },
+    )
+  }
 }
 
 async function processSettlementProposed(
@@ -143,6 +161,24 @@ async function processSettlementExecuted(
   )
 }
 
+/**
+ * Build a deterministic, unique identifier for an on-chain event so that
+ * replaying an overlapping window (e.g. after a reorg or indexer restart)
+ * never applies the same side-effect twice.
+ *
+ * Format: "<pagingToken>" when available (Soroban paging tokens already encode
+ * ledger + tx index + event index), falling back to "<txHash>:<eventType>:<settlementId>".
+ */
+export function buildEventId(
+  pagingToken: string | undefined,
+  txHash: string,
+  eventType: string,
+  settlementId: number,
+): string {
+  if (pagingToken) return pagingToken
+  return `${txHash}:${eventType}:${settlementId}`
+}
+
 export async function processIndexerBatch(
   client: SorobanClient,
   treasuryContractId: string,
@@ -164,35 +200,57 @@ export async function processIndexerBatch(
     ...(cursor.paging_token ? { cursor: cursor.paging_token } : {}),
   })
 
+  // Collect the set of already-processed event IDs stored in the cursor document
+  // so we can skip duplicates that appear when replaying an overlapping window
+  // after a reorg or an indexer restart that resumed from an earlier ledger.
+  const processedIds: Set<string> = new Set(cursor.processed_event_ids ?? [])
+
   let processed = 0
   let lastPagingToken = cursor.paging_token
+  const newEventIds: string[] = []
+
   for (const event of response.events ?? []) {
     const eventType = topicSymbol(event.topic, 0)
     const txHash = event.txHash ?? ""
     lastPagingToken = event.pagingToken ?? lastPagingToken
 
+    if (
+      eventType !== "settlement_proposed" &&
+      eventType !== "settlement_approved" &&
+      eventType !== "settlement_executed"
+    ) {
+      continue
+    }
+
+    const settlementId = Number(valueU64(event.value, 0))
+    const eventId = buildEventId(event.pagingToken, txHash, eventType, settlementId)
+
+    // De-duplicate: skip events we have already applied (reorg / replay protection)
+    if (processedIds.has(eventId)) {
+      console.log(`[treasury-indexer] skipping duplicate event id=${eventId}`)
+      continue
+    }
+
     if (eventType === "settlement_proposed") {
-      const settlementId = Number(valueU64(event.value, 0))
       const token = valueAddress(event.value, 1)
       const amount = valueU64(event.value, 2)
       const merchant = valueAddress(event.value, 3)
       await processSettlementProposed(settlements, settlementId, token, amount, merchant, txHash)
-      processed++
     } else if (eventType === "settlement_approved") {
-      const settlementId = Number(valueU64(event.value, 0))
       const signer = valueAddress(event.value, 1)
       const newWeight = valueU64(event.value, 3)
       await processSettlementApproved(settlements, settlementId, signer, newWeight)
-      processed++
     } else if (eventType === "settlement_executed") {
-      const settlementId = Number(valueU64(event.value, 0))
       await processSettlementExecuted(settlements, settlementId, txHash)
-      processed++
     }
+
+    processedIds.add(eventId)
+    newEventIds.push(eventId)
+    processed++
   }
 
   const lastLedger = response.latestLedger ?? cursor.last_ledger
-  await saveCursor(database, lastPagingToken, lastLedger)
+  await saveCursor(database, lastPagingToken, lastLedger, newEventIds)
 
   if (processed > 0) {
     console.log(

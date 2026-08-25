@@ -262,4 +262,24 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().error, "Challenge not found or already used");
     }
+
+    #[test]
+    fn test_verify_expired_challenge() {
+        let store = create_challenge_store();
+        let resp = generate_challenge(&store);
+        // Manually backdate the expiry
+        store.insert(resp.challenge.clone(), Utc::now() - chrono::Duration::seconds(600));
+        let result = verify_challenge_valid(&store, &resp.challenge);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error, "Challenge has expired");
+    }
+
+    #[test]
+    fn test_generate_challenge_has_unique_nonces() {
+        let store = create_challenge_store();
+        let a = generate_challenge(&store);
+        let b = generate_challenge(&store);
+        assert_ne!(a.challenge, b.challenge);
+        assert_eq!(store.len(), 2);
+    }
 }

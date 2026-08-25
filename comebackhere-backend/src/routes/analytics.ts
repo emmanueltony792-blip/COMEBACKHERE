@@ -1,4 +1,6 @@
 import { Router, type Request, type Response } from "express"
+import { validateQuery } from "../middleware/validate.js"
+import { analyticsQuerySchema } from "../schemas/index.js"
 
 const router = Router()
 
@@ -35,22 +37,8 @@ interface AnalyticsData {
  * - Disputes contract state (open disputes)
  * - Compliance contract state (blocks)
  */
-router.get("/metrics", async (req: Request, res: Response) => {
+router.get("/metrics", validateQuery(analyticsQuerySchema), async (req: Request, res: Response) => {
   try {
-    const startDate = req.query.start_date ? parseInt(req.query.start_date as string) : undefined
-    const endDate = req.query.end_date ? parseInt(req.query.end_date as string) : undefined
-
-    // Validate timestamp parameters if provided
-    if (startDate && !Number.isFinite(startDate)) {
-      return res.status(400).json({ error: "Invalid start_date timestamp" })
-    }
-    if (endDate && !Number.isFinite(endDate)) {
-      return res.status(400).json({ error: "Invalid end_date timestamp" })
-    }
-    if (startDate && endDate && startDate > endDate) {
-      return res.status(400).json({ error: "start_date must be before end_date" })
-    }
-
     // In production, this would:
     // 1. Query the invoice contract for invoice counts by status
     // 2. Query treasury contract for settled volumes by token

@@ -73,6 +73,8 @@ Defined in `contracts/settlement/src/lib.rs`.
 | 2 | `Unauthorized` | Caller has no registered weight in the treasury signer set. | Use a key that was registered via `initialize` or a subsequent signer-rotation call. |
 | 3 | `AlreadyApproved` | The same signer attempted to approve the same settlement twice. | Each signer may approve a settlement only once. |
 | 4 | `NotPending` | `approve_settlement` or `cancel` was called on a settlement that is not in `Pending` status. | Check the settlement status before calling approve or cancel. |
+| 5 | `DuplicateSigner` | `initialize` was called with the same signer address appearing more than once in the `signers` list. | Ensure every `(address, weight)` pair in the `signers` vector is unique before calling `initialize`. |
+| 6 | `InvalidWeightSum` | `initialize` was called with a `threshold` greater than the sum of all signer weights. | Lower the threshold or add signers with sufficient weight so that `sum(weights) ≥ threshold`. |
 
 ---
 
@@ -88,6 +90,8 @@ Defined in `COMEBACKHERE-contracts/contracts/treasury/src/lib.rs`.
 | 4 | `TokenNotAllowed` | `propose_settlement` was called with a token not present in the allowlist (when the allowlist is non-empty). | Admin must call `add_token_to_allowlist` for the token before settlements may be proposed against it. |
 | 5 | `Unauthorized` | Caller is not registered as a signer (for `propose_settlement`/`approve_settlement`) or not the admin (for `set_signer`, `pause`, etc). | Use a key registered via `initialize` or `set_signer`; admin-only operations require the admin key. |
 | 6 | `InvalidThreshold` | `update_threshold` was called with a threshold of 0. | Pass a positive `u32` threshold; the multi-sig cannot function with zero required weight. |
+| 7 | `DuplicateSigner` | `initialize` was called with the same signer address appearing more than once in the `signers` list. | Ensure every `(address, weight)` pair in the `signers` vector is unique before calling `initialize`. |
+| 8 | `InvalidWeightSum` | `initialize` was called with a `threshold` greater than the sum of all signer weights. | Lower the threshold or add signers with sufficient weight so that `sum(weights) ≥ threshold`. |
 
 ---
 
@@ -114,5 +118,7 @@ Backend endpoints return errors as JSON:
 | 403 | 1 (`Unauthorized`) | Caller is not authorised for the operation. |
 | 404 | 6 (`NotFound`), 4 (`InvoiceNotFound`/`AddressNotFound`), Settlement 1 | Resource does not exist. |
 | 422 | 3, 4, 5, 8, 9, 10, 12, 13 | Contract rejected the transaction. |
+| 422 | Settlement 5 (`DuplicateSigner`), Settlement 6 (`InvalidWeightSum`) | `SettlementContract.initialize` called with duplicate signers or total weight below threshold. |
+| 422 | Treasury 7 (`DuplicateSigner`), Treasury 8 (`InvalidWeightSum`) | `TreasuryContract.initialize` called with duplicate signers or total weight below threshold. |
 | 503 | — | Backend misconfiguration (missing env vars). |
 | 504 | — | Transaction confirmation timeout waiting for Soroban. |

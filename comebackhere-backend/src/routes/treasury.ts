@@ -9,6 +9,12 @@ import {
   type SorobanClient,
 } from "../lib/soroban.js"
 import { connectMongo, getSettlementsCollection } from "../db/mongo.js"
+import { validateBody } from "../middleware/validate.js"
+import {
+  settlementIdSchema,
+  executeSettlementSchema,
+  escalateHoldSchema,
+} from "../schemas/index.js"
 
 const router = Router()
 
@@ -36,8 +42,26 @@ function requireEnv(res: Response): {
 }
 
 /**
- * GET /api/treasury/pending-settlements
- * Returns pending settlements indexed from on-chain events.
+ * @openapi
+ * /api/treasury/pending-settlements:
+ *   get:
+ *     tags: [Treasury]
+ *     summary: Get all pending settlements
+ *     responses:
+ *       200:
+ *         description: List of pending settlements
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/SettlementRecord'
+ *       500:
+ *         description: Database error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.get("/pending-settlements", async (_req: Request, res: Response) => {
   try {
@@ -66,18 +90,48 @@ router.get("/pending-settlements", async (_req: Request, res: Response) => {
 })
 
 /**
- * POST /api/treasury/approve-settlement
- * Body: { settlement_id: number }
+ * @openapi
+ * /api/treasury/approve-settlement:
+ *   post:
+ *     tags: [Treasury]
+ *     summary: Approve a pending settlement
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [settlement_id]
+ *             properties:
+ *               settlement_id:
+ *                 type: integer
+ *                 description: Positive integer settlement ID
+ *                 example: 1
+ *     responses:
+ *       200:
+ *         description: Settlement approved
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SettlementRecord'
+ *       400:
+ *         description: settlement_id is not a positive integer
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       503:
+ *         description: Service misconfiguration
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.post("/approve-settlement", async (req: Request, res: Response) => {
+router.post("/approve-settlement", validateBody(settlementIdSchema), async (req: Request, res: Response) => {
   const env = requireEnv(res)
   if (!env) return
 
-  const settlementId = req.body?.settlement_id
-  if (typeof settlementId !== "number" || !Number.isInteger(settlementId) || settlementId <= 0) {
-    res.status(400).json({ error: "settlement_id must be a positive integer" })
-    return
-  }
+  const settlementId = req.body.settlement_id
 
   try {
     const client = buildSorobanClient(env.rpcUrl)
@@ -217,19 +271,81 @@ export async function executeSettlementWithBalanceCheck(
   }
 }
 
-router.post("/execute-settlement", async (req: Request, res: Response) => {
+/**
+ * @openapi
+ * /api/treasury/execute-settlement:
+ *   post:
+ *     tags: [Treasury]
+ *     summary: Execute a fully-approved settlement
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [settlement_id]
+ *             properties:
+ *               settlement_id:
+ *                 type: integer
+ *                 description: Positive integer settlement ID
+ *                 example: 1
+ *               token_contract:
+ *                 type: string
+ *                 description: Token contract address (defaults to USDC_CONTRACT_ID env var)
+ *     responses:
+ *       200:
+ *         description: Settlement executed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 tx_hash:
+ *                   type: string
+ *                   example: "abc123..."
+ *                 settlement_id:
+ *                   type: integer
+ *                   example: 1
+ *                 balance_checked:
+ *                   type: string
+ *                   example: "10000000"
+ *                 amount_required:
+ *                   type: string
+ *                   example: "5000000"
+ *       400:
+ *         description: settlement_id is not a positive integer
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       409:
+ *         description: Settlement is not in Pending status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       422:
+ *         description: Insufficient balance or simulation failure
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       503:
+ *         description: Service misconfiguration
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post("/execute-settlement", validateBody(executeSettlementSchema), async (req: Request, res: Response) => {
   const env = requireEnv(res)
   if (!env) return
 
-  const settlementId = req.body?.settlement_id
-  if (typeof settlementId !== "number" || !Number.isInteger(settlementId) || settlementId <= 0) {
-    res.status(400).json({ error: "settlement_id must be a positive integer" })
-    return
-  }
+  const { settlement_id: settlementId, token_contract } = req.body as { settlement_id: number; token_contract?: string }
 
   try {
     const result = await executeSettlementWithBalanceCheck(
-      { settlement_id: settlementId, token_contract: req.body?.token_contract },
+      { settlement_id: settlementId, token_contract },
       env,
     )
     res.json(result)
@@ -241,8 +357,29 @@ router.post("/execute-settlement", async (req: Request, res: Response) => {
 })
 
 /**
- * GET /api/treasury/on-hold-settlements
- * Returns all settlements currently in OnHold status.
+ * @openapi
+ * /api/treasury/on-hold-settlements:
+ *   get:
+ *     tags: [Treasury]
+ *     summary: Get all on-hold settlements
+ *     responses:
+ *       200:
+ *         description: List of on-hold settlements
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 settlements:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/SettlementRecord'
+ *       500:
+ *         description: Database error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.get("/on-hold-settlements", async (_req: Request, res: Response) => {
   try {
@@ -271,16 +408,45 @@ router.get("/on-hold-settlements", async (_req: Request, res: Response) => {
 })
 
 /**
- * POST /api/treasury/release-hold
- * Body: { settlement_id: number }
- * Transitions a settlement from OnHold back to Pending.
+ * @openapi
+ * /api/treasury/release-hold:
+ *   post:
+ *     tags: [Treasury]
+ *     summary: Release a held settlement back to Pending
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [settlement_id]
+ *             properties:
+ *               settlement_id:
+ *                 type: integer
+ *                 description: Positive integer settlement ID
+ *                 example: 7
+ *     responses:
+ *       200:
+ *         description: Settlement released to Pending
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SettlementRecord'
+ *       400:
+ *         description: settlement_id is not a positive integer
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       409:
+ *         description: Settlement is not currently on hold
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.post("/release-hold", async (req: Request, res: Response) => {
-  const settlementId = req.body?.settlement_id
-  if (typeof settlementId !== "number" || !Number.isInteger(settlementId) || settlementId <= 0) {
-    res.status(400).json({ error: "settlement_id must be a positive integer" })
-    return
-  }
+router.post("/release-hold", validateBody(settlementIdSchema), async (req: Request, res: Response) => {
+  const settlementId = req.body.settlement_id
 
   try {
     const database = await connectMongo()
@@ -312,16 +478,70 @@ router.post("/release-hold", async (req: Request, res: Response) => {
 })
 
 /**
- * POST /api/treasury/escalate-hold
- * Body: { settlement_id: number }
- * Escalates a held settlement (transitions to AdminHold reason).
+ * @openapi
+ * /api/treasury/escalate-hold:
+ *   post:
+ *     tags: [Treasury]
+ *     summary: Escalate a held settlement to governance dispute
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [settlement_id]
+ *             properties:
+ *               settlement_id:
+ *                 type: integer
+ *                 description: Positive integer settlement ID
+ *                 example: 7
+ *               reason:
+ *                 type: string
+ *                 description: Human-readable reason (max 512 chars)
+ *     responses:
+ *       200:
+ *         description: Settlement escalated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 dispute_id:
+ *                   type: string
+ *                   example: "7-1720000001000"
+ *                 settlement_id:
+ *                   type: string
+ *                   example: "7"
+ *                 status:
+ *                   type: string
+ *                   example: "Raised"
+ *                 settlement_status:
+ *                   type: string
+ *                   example: "OnHold"
+ *                 tx_hash:
+ *                   type: string
+ *                   example: "abc123..."
+ *       400:
+ *         description: settlement_id is not a positive integer
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       422:
+ *         description: Soroban simulation or transaction failure
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       503:
+ *         description: Service misconfiguration
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.post("/escalate-hold", async (req: Request, res: Response) => {
-  const settlementId = req.body?.settlement_id
-  if (typeof settlementId !== "number" || !Number.isInteger(settlementId) || settlementId <= 0) {
-    res.status(400).json({ error: "settlement_id must be a positive integer" })
-    return
-  }
+router.post("/escalate-hold", validateBody(escalateHoldSchema), async (req: Request, res: Response) => {
+  const settlementId = req.body.settlement_id
 
   try {
     const database = await connectMongo()

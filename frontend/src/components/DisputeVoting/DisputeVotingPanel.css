@@ -2,11 +2,53 @@
   max-width: 720px;
 }
 
+.dispute-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
 .dispute-panel__title {
   font-size: 1.25rem;
   font-weight: 700;
-  margin-bottom: 24px;
   color: var(--color-text);
+  margin: 0;
+}
+
+/* Live update indicator area */
+.dispute-panel__live {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dispute-panel__update-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  background: var(--color-success-soft-bg, #d1fae5);
+  color: var(--color-success-soft-text, #065f46);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  animation: dispute-pulse 0.4s ease;
+}
+
+@keyframes dispute-pulse {
+  0%   { opacity: 0; transform: scale(0.9); }
+  60%  { opacity: 1; transform: scale(1.05); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.dispute-panel__last-updated {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
 }
 
 .dispute-panel__section-title {

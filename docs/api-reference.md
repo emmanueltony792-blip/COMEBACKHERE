@@ -5,6 +5,10 @@ Base URL: `http://localhost:3000` (local) or your deployed backend.
 All request bodies are JSON (`Content-Type: application/json`).
 All responses are JSON.
 
+> **Machine-readable spec:** A Swagger/OpenAPI 3.0 spec is served at
+> [`GET /api-docs/swagger.json`](http://localhost:3000/api-docs/swagger.json) (raw JSON)
+> and [`GET /api-docs`](http://localhost:3000/api-docs) (interactive Swagger UI).
+
 ---
 
 ## Health

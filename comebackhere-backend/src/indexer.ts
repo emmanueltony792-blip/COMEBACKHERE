@@ -149,6 +149,23 @@ export async function pollOnce(
 // Start function — exported for embedding; also runs as CLI entry point
 // ---------------------------------------------------------------------------
 
+/** Handle to the running poll loop, used by stop() to prevent new polls. */
+let stopped = false
+let activeTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Stops the indexer poll loop. Safe to call multiple times.
+ * Does not interrupt an in-flight pollOnce() call; it prevents scheduling
+ * the next one so any active poll completes cleanly before the process exits.
+ */
+export function stopIndexer(): void {
+  stopped = true
+  if (activeTimer !== null) {
+    clearTimeout(activeTimer)
+    activeTimer = null
+  }
+}
+
 export async function startIndexer(options?: {
   rpcUrl?: string
   contractId?: string
@@ -168,15 +185,20 @@ export async function startIndexer(options?: {
   console.log(`[indexer] starting — contract=${contractId} cursor=${cursor} interval=${pollIntervalMs}ms`)
 
   const loop = async () => {
+    if (stopped) return
     try {
       await pollOnce(server, contractId)
     } catch (err) {
       const handler = options?.onError ?? ((e) => console.error("[indexer] poll error", e))
       handler(err)
     }
-    setTimeout(loop, pollIntervalMs)
+    if (!stopped) {
+      activeTimer = setTimeout(loop, pollIntervalMs)
+    }
   }
 
+  // Reset stopped flag in case startIndexer is called again after stopIndexer
+  stopped = false
   loop()
 }
 

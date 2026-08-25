@@ -5,6 +5,15 @@ import { releaseEscrow } from "../routes/release-escrow.js"
 import type { SorobanClient } from "../lib/soroban.js"
 import { SorobanRpc, SorobanDataBuilder, xdr } from "stellar-sdk"
 
+// ── Mock lib/soroban so no live Soroban node is required ─────────────────────
+vi.mock("../lib/soroban.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../lib/soroban.js")>()
+  return {
+    ...original,
+    buildSorobanClient: vi.fn(),
+  }
+})
+
 // Pre-parsed simulation success accepted by assembleTransaction without XDR parsing
 const PARSED_SIM_SUCCESS = {
   _parsed: true,
@@ -108,6 +117,104 @@ describe("POST /invoices/:id/release-escrow — HTTP layer", () => {
       .send()
     expect(res.status).toBe(503)
     expect(res.body.error).toMatch(/misconfiguration/)
+  })
+})
+
+// ── Authorization tests (issue #223) ─────────────────────────────────────────
+describe("POST /invoices/:id/release-escrow — authorization", () => {
+  let envBackup: Record<string, string | undefined>
+
+  beforeEach(async () => {
+    envBackup = {}
+    for (const key of Object.keys(ENV)) {
+      envBackup[key] = process.env[key]
+      process.env[key] = ENV[key as keyof typeof ENV]
+    }
+
+    // Wire buildSorobanClient to return a mock for end-to-end HTTP tests
+    const sorobanMod = await import("../lib/soroban.js")
+    vi.mocked(sorobanMod.buildSorobanClient).mockReturnValue(
+      makeMockClient({
+        getAccount: vi.fn().mockResolvedValue(fakeAccount),
+        simulateTransaction: vi.fn().mockResolvedValue(PARSED_SIM_SUCCESS),
+        sendTransaction: vi.fn().mockResolvedValue({ status: "PENDING", hash: "release-ok-hash" }),
+        getTransaction: vi.fn().mockResolvedValue({
+          status: SorobanRpc.Api.GetTransactionStatus.SUCCESS,
+          latestLedger: 1,
+          latestLedgerCloseTime: 0,
+          oldestLedger: 1,
+          oldestLedgerCloseTime: 0,
+        }),
+      }),
+    )
+  })
+
+  afterEach(() => {
+    for (const [key, val] of Object.entries(envBackup)) {
+      if (val === undefined) delete process.env[key]
+      else process.env[key] = val
+    }
+    vi.restoreAllMocks()
+  })
+
+  it("200 — authorized merchant with correct x-admin-key succeeds (authorized-merchant-success)", async () => {
+    const app = createApp()
+    const res = await request(app)
+      .post("/invoices/42/release-escrow")
+      .set("x-admin-key", ADMIN_KEY)
+      .send()
+
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({
+      invoice_id: 42,
+      status: "Released",
+      tx_hash: expect.any(String),
+    })
+  })
+
+  it("401 — unauthorized caller without x-admin-key is rejected (unauthorized-caller-rejection)", async () => {
+    const app = createApp()
+    const res = await request(app)
+      .post("/invoices/42/release-escrow")
+      .send()
+
+    expect(res.status).toBe(401)
+    expect(res.body.error).toMatch(/Unauthorized/)
+  })
+
+  it("401 — unauthorized caller with wrong x-admin-key is rejected (unauthorized-caller-rejection)", async () => {
+    const app = createApp()
+    const res = await request(app)
+      .post("/invoices/42/release-escrow")
+      .set("x-admin-key", "not-the-real-key")
+      .send()
+
+    expect(res.status).toBe(401)
+    expect(res.body.error).toMatch(/Unauthorized/)
+  })
+
+  it("403 — on-chain Unauthorized contract error maps to 403 Forbidden", async () => {
+    // Override the mock to return an on-chain auth error
+    const sorobanMod = await import("../lib/soroban.js")
+    vi.mocked(sorobanMod.buildSorobanClient).mockReturnValue(
+      makeMockClient({
+        getAccount: vi.fn().mockResolvedValue(fakeAccount),
+        simulateTransaction: vi.fn().mockResolvedValue({
+          error: "HostError: Error(Contract, #1) UNAUTHORIZED",
+          latestLedger: 1,
+        }),
+      }),
+    )
+
+    const app = createApp()
+    const res = await request(app)
+      .post("/invoices/42/release-escrow")
+      .set("x-admin-key", ADMIN_KEY)
+      .send()
+
+    expect(res.status).toBe(403)
+    expect(res.body.error).toMatch(/authoris/)
+    expect(res.body.code).toBe(1)
   })
 })
 

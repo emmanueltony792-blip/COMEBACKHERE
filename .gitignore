@@ -19,6 +19,7 @@ artifacts/addresses.json
 coverage/
 
 # Test snapshots & reports
+**/test_snapshots/
 **/__snapshots__/
 **/*.snap
 test-results/
@@ -43,3 +44,18 @@ Thumbs.db
 
 # Vite cache
 .vite/
+.vite-inspect/
+
+# Vitest / Jest output
+vitest-report/
+html/
+lcov.info
+
+# Rust build artifacts
+**/*.wasm
+**/Cargo.lock.bak
+
+# Miscellaneous generated files
+*.local
+.turbo/
+.parcel-cache/

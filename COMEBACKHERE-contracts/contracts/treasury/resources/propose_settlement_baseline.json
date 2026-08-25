@@ -1,0 +1,8 @@
+{
+  "test": "bench_propose_settlement",
+  "cpu_instructions": 100000,
+  "memory_bytes": 50000,
+  "timestamp": "2026-07-29",
+  "toolchain": "1.85.0",
+  "soroban_sdk": "20.0.0"
+}

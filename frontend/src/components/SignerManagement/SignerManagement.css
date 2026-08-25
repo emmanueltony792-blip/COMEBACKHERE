@@ -257,3 +257,91 @@
   gap: 10px;
   justify-content: flex-end;
 }
+
+/* Rotate-signer modal extensions */
+.modal--rotate {
+  max-width: 480px;
+}
+
+.modal__address-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.modal__address-section:first-of-type {
+  padding-top: 0;
+  border-top: none;
+}
+
+.modal__address-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.modal__address-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modal__address-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.modal__address-empty {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.modal__address-mono {
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  font-size: 0.82rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  word-break: break-all;
+  flex: 1;
+}
+
+.modal__address-full {
+  display: none;
+}
+
+.modal__address-short {
+  display: inline;
+}
+
+@media (min-width: 480px) {
+  .modal__address-full {
+    display: inline;
+  }
+  .modal__address-short {
+    display: none;
+  }
+}
+
+.modal__address-weight {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.modal__pending-note {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  font-style: italic;
+}

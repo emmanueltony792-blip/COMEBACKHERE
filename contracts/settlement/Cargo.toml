@@ -14,3 +14,4 @@ soroban-sdk = "21"
 
 [dev-dependencies]
 soroban-sdk = { version = "21", features = ["testutils"] }
+proptest = "1.4"

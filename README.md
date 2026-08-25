@@ -1,133 +1,210 @@
-# COMEBACKHERE
+# COMEBACKHERE Protocol
 
-> **COMEBACKHERE Protocol** — The Stripe for Stellar.
-> Founded and built by **[dreamgene](https://github.com/dreamgeneX)** · Founder & CEO
+> **The Stripe for Stellar**
+> Secure, scalable, and developer-friendly payment infrastructure built on the Stellar network.
 
-Tooling, deployment scripts, ABIs, and integration resources for COMEBACKHERE Protocol.
+This repository contains the tooling, deployment scripts, contract ABIs, documentation, and integration resources required to develop, deploy, and maintain the **COMEBACKHERE Protocol**.
+
+---
+
+## Overview
+
+COMEBACKHERE provides the infrastructure needed to build seamless payment experiences on Stellar. This repository serves as the central workspace for:
+
+* Smart contract deployment
+* ABI generation and management
+* Developer documentation
+* Local development tooling
+* Integration and deployment scripts
+* Workspace-level testing
+
+---
 
 ## Architecture
 
-The following sequence diagram illustrates the primary payment flow.
+The diagram below illustrates the primary payment flow through the COMEBACKHERE Protocol.
 
-```mermaid
-sequenceDiagram
-    actor Merchant
-    actor Payer
-    participant InvoiceContract
-    participant TreasuryContract
+> *(Insert architecture or sequence diagram here.)*
 
-    Merchant->>InvoiceContract: create_invoice(amount, expires_at)
-    InvoiceContract-->>Merchant: invoice_id
+---
 
-    Payer->>InvoiceContract: mark_paid(invoice_id)
-    InvoiceContract->>TreasuryContract: hold funds
-    InvoiceContract-->>Payer: payment confirmed
+## Repository Structure
 
-    Merchant->>TreasuryContract: propose_settlement(invoice_id)
-    TreasuryContract-->>Merchant: settlement_id
-
-    Merchant->>TreasuryContract: approve_settlement(settlement_id)
-    TreasuryContract->>Merchant: release payout
+```text
+.
+├── abis/          # Contract ABI files consumed by the backend
+├── docs/          # Developer guides and deployment documentation
+├── scripts/       # Deployment, verification, and utility scripts
+└── tests/         # Workspace-level integration tests
 ```
 
-## Workspace
+| Directory  | Description                                            |
+| ---------- | ------------------------------------------------------ |
+| `abis/`    | Generated contract ABIs used by `comebackhere-backend` |
+| `scripts/` | Deployment, verification, and ABI generation scripts   |
+| `docs/`    | Technical documentation and deployment guides          |
+| `tests/`   | Integration and workspace-level test suites            |
 
-- `abis/`: committed ABI metadata consumed by `comebackhere-backend`
-- `scripts/`: deployment, verification, and ABI generation tooling
-- `docs/`: developer guides and deployment documentation
-- `tests/`: workspace-level integration tests
+---
 
-## Local Development
+# Local Development
 
-### Starting the Local Environment
+## Prerequisites
 
-Requires Docker and Docker Compose.
+Before getting started, ensure you have:
 
-```sh
+* Docker
+* Docker Compose
+
+---
+
+## Start the Development Environment
+
+Launch all required services:
+
+```bash
 docker-compose up -d
 ```
 
-This starts:
+This starts the following services:
 
-- **Soroban Node**: Stellar quickstart (Horizon at `http://localhost:8000`)
-- **Redis**: Event consumer backing service (port 6379)
+| Service      | Description                                           | Default Port |
+| ------------ | ----------------------------------------------------- | ------------ |
+| Soroban Node | Stellar Quickstart environment (includes Horizon API) | `8000`       |
+| Redis        | Event consumer backing service                        | `6379`       |
 
-Check service health:
+---
 
-```sh
+## Verify the Services
+
+Check that the containers are running:
+
+```bash
 docker-compose ps
+```
+
+Verify the Soroban node is healthy:
+
+```bash
 curl http://localhost:8000/health
 ```
 
-### docker-compose.override.yml
+---
 
-A `docker-compose.override.yml` file is included in the repository. Docker
-Compose [automatically merges]
-(https://docs.docker.com/compose/how-tos/multiple-compose-files/merge/) this
-file with `docker-compose.yml` when you run `docker-compose up`. The override
-adds the **backend** and **frontend** services so you can run the full stack
-locally without modifying the base compose file.
+## Using `docker-compose.override.yml`
 
-Developers commonly edit this file to:
+This repository includes a `docker-compose.override.yml` file.
 
-- Point `VITE_API_URL` / `VITE_SOROBAN_RPC` to a different environment
-- Adjust port mappings if the defaults conflict with other services
-- Mount local source directories for hot-reloading during development
+Docker Compose automatically merges this file with `docker-compose.yml` whenever you run:
 
-To inspect the effective compose configuration that Docker will use:
+```bash
+docker-compose up
+```
 
-```sh
+The override configuration adds the following development services:
+
+* Backend
+* Frontend
+
+This allows you to run the complete application stack locally without modifying the base compose configuration.
+
+### Common Customizations
+
+Developers often update the override file to:
+
+* Change `VITE_API_URL`
+* Change `VITE_SOROBAN_RPC`
+* Modify port mappings
+* Mount local source directories for hot reloading
+* Customize environment-specific settings
+
+To view the final merged configuration:
+
+```bash
 docker-compose config
 ```
 
-### Deploying Contracts Locally
+---
 
-```sh
-cp .env.local.example .env.local
-# Edit .env.local with your test keys
-scripts/deploy_local.sh
-```
+# ABI Snapshot Verification
 
-### Tearing Down
+Before committing changes, ensure the generated ABI snapshots are up to date.
 
-```sh
-docker-compose down
-# To also remove persistent data:
-docker-compose down -v
-```
+Using Make:
 
-## ABI Snapshots
-
-Committed ABI metadata in `abis/` is generated from contract sources. The contract sources live in `COMEBACKHERE-contracts/`. Before opening a PR that changes contract behavior, refresh snapshots:
-
-```sh
-make update-abi-snapshots
-# or
-just snapshot
-```
-
-Confirm the tree is clean:
-
-```sh
+```bash
 make check-abi-snapshots
-# or
+```
+
+Or with Just:
+
+```bash
 just check-snapshot
+```
+
+Finally, verify there are no uncommitted ABI changes:
+
+```bash
 git diff --exit-code abis/
 ```
 
-## Deployment
+---
 
-```sh
+# Deployment
+
+## Testnet Deployment
+
+Copy the example environment file:
+
+```bash
 cp .env.testnet.example .env.testnet
+```
+
+Deploy the contracts:
+
+```bash
 scripts/deploy_testnet.sh
 ```
 
-After deployment, contract IDs are exported to `artifacts/addresses.json` (gitignored; environment-specific). See `artifacts/addresses.json.example` for the schema.
+After deployment, contract addresses are exported to:
 
-Mainnet deployment is intentionally manual and must go through multi-sig governance.
+```text
+artifacts/addresses.json
+```
 
-See `docs/MAINNET_DEPLOYMENT.md` for the live deployment checklist and signing ceremony.
+This file is intentionally ignored by Git because it contains environment-specific deployment data.
 
-## License
+For the expected structure, refer to:
 
-MIT
+```text
+artifacts/addresses.json.example
+```
+
+---
+
+## Mainnet Deployment
+
+Mainnet deployments are intentionally **manual** and require approval through the project's multisignature governance process.
+
+Before deploying to production, follow the complete deployment checklist and signing ceremony documented in:
+
+```text
+docs/MAINNET_DEPLOYMENT.md
+```
+
+---
+
+# Contributing
+
+Before opening a pull request:
+
+* Keep ABI snapshots up to date.
+* Verify all tests pass.
+* Review deployment documentation if modifying contracts or deployment scripts.
+* Ensure your branch is clean and free of unintended changes.
+
+---
+
+# License
+
+This project is licensed under the **MIT License**.

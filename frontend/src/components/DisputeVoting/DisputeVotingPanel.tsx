@@ -41,8 +41,8 @@ function DisputeCard({ dispute, onVote }: { dispute: Dispute; onVote: (id: numbe
     setErr(null)
     try {
       await onVote(dispute.settlement_id, vote)
-    } catch (e: any) {
-      setErr(e.message)
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Unknown error')
     } finally {
       setVoting(false)
     }
@@ -96,8 +96,12 @@ function DisputeCard({ dispute, onVote }: { dispute: Dispute; onVote: (id: numbe
   )
 }
 
+function formatTime(date: Date): string {
+  return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 export default function DisputeVotingPanel() {
-  const { disputes, loading, error, voteDispute } = useDisputes()
+  const { disputes, loading, error, voteDispute, lastUpdated, weightChanged } = useDisputes()
 
   if (loading && disputes.length === 0) return <div className="dispute-panel"><p>Loading disputes...</p></div>
   if (error && disputes.length === 0) return <div className="dispute-panel"><p className="dispute-panel__error">Error: {error}</p></div>
@@ -107,7 +111,24 @@ export default function DisputeVotingPanel() {
 
   return (
     <div className="dispute-panel">
-      <h2 className="dispute-panel__title">Dispute Resolution</h2>
+      <div className="dispute-panel__header">
+        <h2 className="dispute-panel__title">Dispute Resolution</h2>
+
+        {/* Real-time update indicator */}
+        <div className="dispute-panel__live" aria-live="polite" aria-atomic="true">
+          {weightChanged && (
+            <span className="dispute-panel__update-badge" role="status">
+              ● Weights updated
+            </span>
+          )}
+          {lastUpdated && (
+            <span className="dispute-panel__last-updated">
+              Last synced: {formatTime(lastUpdated)}
+            </span>
+          )}
+        </div>
+      </div>
+
       {open.length === 0 && resolved.length === 0 && <p>No disputes found.</p>}
       {open.length > 0 && (
         <section>

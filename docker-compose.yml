@@ -45,7 +45,35 @@ services:
       timeout: 3s
       retries: 10
 
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - SOROBAN_RPC_URL=http://soroban:8000/soroban/rpc
+      - HORIZON_API_URL=http://soroban:8000
+      - INVOICE_CONTRACT_ID=${INVOICE_CONTRACT_ID:-CONTRACT_ID_PLACEHOLDER}
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      soroban:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health/rpc"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    volumes:
+      - backend_data:/app/data
+
 volumes:
   soroban_data:
   redis_data:
   mongodb_data:
+  backend_data:

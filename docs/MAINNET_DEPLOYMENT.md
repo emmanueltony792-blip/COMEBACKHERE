@@ -264,3 +264,182 @@ If a critical issue is discovered after deployment:
    operations immediately
 3. Follow the standard ceremony process for any corrective deployment
 4. Document the incident in a post-mortem within 48 hours
+
+---
+
+## Upgrades and Migrations
+
+Soroban supports in-place contract upgrades: the WASM bytecode is replaced
+while the contract address, instance storage, and persistent storage remain
+intact. No redeployment or re-initialization is needed. The upgrade mechanism
+is a protocol-level host function — no proxy pattern is required.
+
+All upgrades follow the same multi-sig governance process described in the
+[Multi-Sig Governance Model](#multi-sig-governance-model) section above and
+require a full signing ceremony.
+
+### How WASM Upgrades Work
+
+Upgrading a contract replaces the executable code identified by the contract
+address. The contract must expose an `upgrade` function that calls
+`env.deployer().update_current_contract_wasm(new_wasm_hash)`. The new WASM
+must be uploaded to the ledger before the upgrade transaction is submitted.
+
+A `SYSTEM` contract event is emitted automatically on upgrade with:
+
+- `topics = ["executable_update", old_executable, new_executable]`
+- `data = []`
+
+Backend services that monitor contract events can use this to detect upgrades.
+
+### Upgrade Procedure
+
+1. **Open an upgrade issue** — Include the target contract(s), target commit
+   SHA, reason for upgrade, and expected WASM hashes.
+2. **Collect multi-sig approvals** — Follow the same approval process as
+   initial deployment.
+3. **Build and verify artifacts** from a clean checkout:
+
+   ```sh
+   git clone --branch <TAG> --depth 1 <REPO_URL>
+   cd COMEBACKHERE-contracts/
+   cargo build --target wasm32-unknown-unknown --release
+   sha256sum target/wasm32-unknown-unknown/release/comebackhere_*.wasm
+   ```
+
+4. **Upload new WASM to the ledger** (does not affect the live contract):
+
+   ```sh
+   stellar contract upload \
+     --source-account <ADMIN_KEY> \
+     --wasm target/wasm32-unknown-unknown/release/<CONTRACT>.wasm \
+     --network mainnet
+   # Outputs: <NEW_WASM_HASH>
+   ```
+
+5. **Invoke the upgrade function** through the standard ceremony process:
+
+   ```sh
+   stellar contract invoke \
+     --id <CONTRACT_ID> \
+     --source-account <ADMIN_KEY> \
+     --network mainnet \
+     -- upgrade \
+     --new_wasm_hash <NEW_WASM_HASH>
+   ```
+
+6. **Verify** the upgrade by querying contract state and running the
+   post-ceremony smoke test.
+7. **Record** the new WASM hash and transaction hash in the upgrade issue.
+
+The contract address does not change. Update `INVOICE_CONTRACT_ID`,
+`TREASURY_CONTRACT_ID`, or `COMPLIANCE_CONTRACT_ID` in backend secrets only
+if a new contract was deployed rather than upgraded in-place.
+
+### Upgrade Authorization
+
+Each contract enforces admin authorization in its `upgrade` function:
+
+```rust
+pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+    let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+    admin.require_auth();
+    env.deployer().update_current_contract_wasm(new_wasm_hash);
+}
+```
+
+The `--source-account` used to invoke `upgrade` must match the contract's
+stored admin address. The compliance contract admin key must be used for
+compliance contract upgrades; the treasury admin key for treasury upgrades.
+
+### Storage Migration
+
+If an upgrade changes a stored data structure (adds, removes, or renames
+fields), old ledger entries written by the previous version must be handled
+explicitly. Reading an old entry with a new incompatible type causes the host
+to trap with `Error(Object, UnexpectedSize)`.
+
+#### Recommended pattern: versioned enum
+
+Wrap each stored type in a versioned enum so old and new layouts can coexist:
+
+```rust
+#[contracttype]
+pub struct DataV1 { a: i64, b: i64 }
+
+#[contracttype]
+pub struct DataV2 { a: i64, b: i64, c: Option<i64> }
+
+#[contracttype]
+pub enum Data {
+    V1(DataV1),
+    V2(DataV2),
+}
+
+impl Data {
+    pub fn into_v2(self) -> DataV2 {
+        match self {
+            Data::V1(v1) => DataV2 { a: v1.a, b: v1.b, c: None },
+            Data::V2(v2) => v2,
+        }
+    }
+}
+```
+
+Reads call `into_v2()` to up-convert lazily; writes always store `Data::V2`.
+
+#### Lazy vs eager migration
+
+| Strategy | When to use | Risk |
+| -------- | ----------- | ---- |
+| **Lazy** (convert on read) | Default choice; large or unbounded datasets | None at upgrade time; old entries persist until accessed |
+| **Eager** (batch rewrite via admin function) | Small, bounded datasets where old version branches must be retired | Hits instruction limits if record count is large; contract is in mixed-version state during the migration window |
+
+Lazy migration is preferred for COMEBACKHERE contracts. Old entries are
+up-converted the first time they are read after the upgrade and written back
+in the new format. No explicit migration transaction is required.
+
+If an eager migration is necessary (e.g., to retire old version branches),
+scope it to a dedicated `migrate(ids: Vec<u32>)` admin function that processes
+a bounded batch per transaction, and gate it behind the same admin
+authorization as `upgrade`.
+
+### Upgrade Abort Conditions
+
+- WASM hash of the uploaded artifact does not match the upgrade issue
+- Admin authorization check fails
+- Post-upgrade smoke test fails or contract returns unexpected state
+- Any signer mismatch during the ceremony
+
+If the upgrade transaction has not been submitted, abort by closing the upgrade
+issue without submitting. Once submitted, the upgrade cannot be rolled back
+directly — follow the Emergency Rollback procedure above and schedule a
+corrective upgrade through the full ceremony process.
+
+### Upgrade Checklist
+
+#### Pre-Upgrade (Lead Deployer, 24–48 hours before)
+
+- [ ] Open a GitHub upgrade issue with target contract(s), commit SHA, and
+      reason for upgrade
+- [ ] Build WASM artifacts from a clean checkout and compute SHA-256 hashes
+- [ ] Post hashes in the upgrade issue and tag required signers
+- [ ] Identify any storage structure changes in the diff and document the
+      migration strategy in the upgrade issue
+- [ ] Confirm Soroban mainnet RPC health
+
+#### Upgrade Execution (All signers, synchronous)
+
+- [ ] Roll call — confirm identity of all signers
+- [ ] Each signer independently verifies WASM hashes match the upgrade issue
+- [ ] Upload new WASM with `stellar contract upload`; confirm the returned hash
+- [ ] Invoke `upgrade` with the new WASM hash through the approved signer
+- [ ] Wait for transaction confirmation; record transaction hash
+- [ ] Run post-upgrade smoke test
+- [ ] Record transaction hash in the upgrade issue
+
+#### Post-Upgrade (Lead Deployer, within 24 hours)
+
+- [ ] Update `abis/` with new contract metadata
+- [ ] Open a PR to update ABI snapshots and any configuration references
+- [ ] Notify the team that the upgrade is live

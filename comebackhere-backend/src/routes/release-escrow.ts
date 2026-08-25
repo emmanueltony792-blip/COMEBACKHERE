@@ -6,6 +6,8 @@ import {
   submitContractCall,
   type SorobanClient,
 } from "../lib/soroban.js"
+import { validateBody, validateParams } from "../middleware/validate.js"
+import { releaseEscrowIdParamSchema } from "../schemas/index.js"
 
 const router = Router({ mergeParams: true })
 
@@ -89,7 +91,7 @@ export async function releaseEscrow(
  *   503  required environment variables missing
  *   5xx  unexpected Soroban / network error
  */
-router.post("/:id/release-escrow", async (req: Request, res: Response) => {
+router.post("/:id/release-escrow", validateParams(releaseEscrowIdParamSchema), async (req: Request, res: Response) => {
   // Admin-only authorization
   const adminKey = req.headers["x-admin-key"]
   if (!adminKey || adminKey !== process.env.ADMIN_KEY) {
@@ -98,10 +100,6 @@ router.post("/:id/release-escrow", async (req: Request, res: Response) => {
   }
 
   const { id } = req.params
-  if (!id || !/^\d+$/.test(id) || parseInt(id, 10) <= 0) {
-    res.status(400).json({ error: "id must be a positive integer" })
-    return
-  }
 
   const invoiceId = parseInt(id, 10)
   const env = requireEnv(res)

@@ -7,6 +7,8 @@ import {
   submitContractCall,
   type SorobanClient,
 } from "../lib/soroban.js"
+import { validateBody } from "../middleware/validate.js"
+import { thresholdSchema } from "../schemas/index.js"
 
 const router = Router()
 
@@ -92,15 +94,11 @@ export async function setThreshold(
   return { threshold, tx_hash: txHash }
 }
 
-router.post("/threshold", async (req: Request, res: Response) => {
+router.post("/threshold", validateBody(thresholdSchema), async (req: Request, res: Response) => {
   const env = requireEnv(res)
   if (!env) return
 
-  const threshold = req.body?.threshold
-  if (typeof threshold !== "number" || !Number.isInteger(threshold) || threshold <= 0) {
-    res.status(400).json({ error: "threshold must be a positive integer" })
-    return
-  }
+  const threshold = req.body.threshold
 
   try {
     const result = await setThreshold(threshold, env)

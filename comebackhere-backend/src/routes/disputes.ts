@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express"
-import { Keypair } from "stellar-sdk"
+import { validateBody } from "../middleware/validate.js"
+import { voteBodySchema, createDisputeSchema } from "../schemas/index.js"
 
 const router = Router()
 
@@ -18,32 +19,75 @@ const VOTE_THRESHOLD = Number(process.env.DISPUTE_VOTE_THRESHOLD ?? 2)
 type VoteValue = "ResolvedClaimant" | "ResolvedCounterparty"
 
 /**
- * POST /disputes/:id/vote
- * Body: { signer_address: string, vote: "ResolvedClaimant" | "ResolvedCounterparty", weight?: number }
+ * @openapi
+ * /disputes/{id}/vote:
+ *   post:
+ *     tags: [Disputes]
+ *     summary: Cast a vote on a dispute
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Dispute ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [signer_address, vote]
+ *             properties:
+ *               signer_address:
+ *                 type: string
+ *                 description: Valid Stellar public key of the voting signer
+ *               vote:
+ *                 type: string
+ *                 enum: [ResolvedClaimant, ResolvedCounterparty]
+ *               weight:
+ *                 type: integer
+ *                 default: 1
+ *     responses:
+ *       200:
+ *         description: Vote recorded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 dispute_id:
+ *                   type: string
+ *                 signer_address:
+ *                   type: string
+ *                 vote:
+ *                   type: string
+ *                 claimant_weight:
+ *                   type: integer
+ *                 counterparty_weight:
+ *                   type: integer
+ *                 outcome:
+ *                   type: string
+ *                   nullable: true
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       409:
+ *         description: Dispute already resolved or signer already voted
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.post("/:id/vote", async (req: Request, res: Response) => {
+router.post("/:id/vote", validateBody(voteBodySchema), async (req: Request, res: Response) => {
   const disputeId = req.params.id
-  const { signer_address, vote, weight = 1 } = req.body as {
-    signer_address?: string
-    vote?: string
-    weight?: number
-  }
-
-  if (!signer_address) {
-    res.status(400).json({ error: "signer_address is required" })
-    return
-  }
-  if (!isValidStellarAddress(signer_address)) {
-    res.status(400).json({ error: "signer_address must be a valid Stellar public key" })
-    return
-  }
-  if (vote !== "ResolvedClaimant" && vote !== "ResolvedCounterparty") {
-    res.status(400).json({ error: "vote must be 'ResolvedClaimant' or 'ResolvedCounterparty'" })
-    return
-  }
-  if (typeof weight !== "number" || weight < 1) {
-    res.status(400).json({ error: "weight must be a positive integer" })
-    return
+  const { signer_address, vote, weight } = req.body as {
+    signer_address: string
+    vote: "ResolvedClaimant" | "ResolvedCounterparty"
+    weight: number
   }
 
   const state: DisputeVoteState = disputeVotes.get(disputeId) ?? {
@@ -102,40 +146,67 @@ export interface CreateDisputeBody {
   reason?: string
 }
 
-function isValidStellarAddress(addr: string): boolean {
-  try {
-    Keypair.fromPublicKey(addr)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function validateBody(body: Partial<CreateDisputeBody>): string | null {
-  if (!body.claimant_address) return "claimant_address is required"
-  if (!isValidStellarAddress(body.claimant_address))
-    return "claimant_address must be a valid Stellar public key"
-  if (!body.settlement_id) return "settlement_id is required"
-  if (typeof body.settlement_id !== "string" || !/^\d+$/.test(body.settlement_id))
-    return "settlement_id must be a positive integer string"
-  return null
-}
-
 /**
- * POST /disputes
- * Validates the claimant, links the dispute to a settlement, transitions the
- * settlement to OnHold, and returns a dispute record.
- *
- * Body:  { claimant_address, settlement_id, reason? }
- * Returns: { dispute_id, settlement_id, claimant_address, status, settlement_status }
+ * @openapi
+ * /disputes:
+ *   post:
+ *     tags: [Disputes]
+ *     summary: Raise a dispute linked to a settlement
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [claimant_address, settlement_id]
+ *             properties:
+ *               claimant_address:
+ *                 type: string
+ *                 description: Valid Stellar public key of the disputing party
+ *               settlement_id:
+ *                 type: string
+ *                 description: Positive integer string identifying the settlement
+ *                 example: "5"
+ *               reason:
+ *                 type: string
+ *                 description: Human-readable reason for the dispute
+ *     responses:
+ *       201:
+ *         description: Dispute raised; settlement transitioned to OnHold
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 dispute_id:
+ *                   type: string
+ *                   example: "5-1720000000000"
+ *                 settlement_id:
+ *                   type: string
+ *                   example: "5"
+ *                 claimant_address:
+ *                   type: string
+ *                 status:
+ *                   type: string
+ *                   example: "Raised"
+ *                 settlement_status:
+ *                   type: string
+ *                   example: "OnHold"
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       503:
+ *         description: Service misconfiguration
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.post("/", async (req: Request, res: Response) => {
-  const body = req.body as Partial<CreateDisputeBody>
-  const validationError = validateBody(body)
-  if (validationError) {
-    res.status(400).json({ error: validationError })
-    return
-  }
+router.post("/", validateBody(createDisputeSchema), async (req: Request, res: Response) => {
+  const body = req.body as CreateDisputeBody
 
   const rpcUrl = process.env.SOROBAN_RPC_URL
   const settlementContractId = process.env.SETTLEMENT_CONTRACT_ID
@@ -146,8 +217,8 @@ router.post("/", async (req: Request, res: Response) => {
     return
   }
 
-  const settlementId = body.settlement_id as string
-  const claimantAddress = body.claimant_address as string
+  const settlementId = body.settlement_id
+  const claimantAddress = body.claimant_address
 
   try {
     // In production this would call raise_dispute on the settlement contract via Soroban RPC.

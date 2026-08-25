@@ -1,6 +1,17 @@
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  MIRRORED / DEPRECATED TREE                                 ║
+# ║  This workspace is an older in-tree copy of the canonical    ║
+# ║  COMEBACKHERE-contracts/ workspace. It exists only for       ║
+# ║  backward-compatible doc references and review familiarity.  ║
+# ║                                                              ║
+# ║  → All new contract work MUST target COMEBACKHERE-contracts/ ║
+# ║  → See ARCHITECTURE.md for the full rationale                ║
+# ╚══════════════════════════════════════════════════════════════╝
 [workspace]
 members = [
     "invoice",
+    "settlement",
     "api-integration-tests",
+    "settlement",
 ]
 resolver = "2"

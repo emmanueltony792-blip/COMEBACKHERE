@@ -4,16 +4,28 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use std::sync::Arc;
 
-use crate::soroban::SorobanClient;
+use crate::AppState;
 use crate::types::ErrorResponse;
 
+#[utoipa::path(
+    get,
+    path = "/invoices/{id}",
+    params(
+        ("id" = u64, Path, description = "Invoice ID")
+    ),
+    responses(
+        (status = 200, description = "Invoice found", body = serde_json::Value),
+        (status = 404, description = "Invoice not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "invoices"
+)]
 pub async fn get_invoice(
-    State(client): State<Arc<SorobanClient>>,
+    State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> impl IntoResponse {
-    match client.get_invoice(id).await {
+    match state.client.get_invoice(id).await {
         Ok(invoice) => (StatusCode::OK, Json(serde_json::json!(invoice))).into_response(),
         Err(e) if e.to_string().contains("NOT_FOUND") => (
             StatusCode::NOT_FOUND,

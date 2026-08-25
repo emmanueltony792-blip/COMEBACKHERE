@@ -93,9 +93,19 @@ export default function ThresholdConfig() {
     ? calculateQuorumPreview(parsed, signers)
     : null
 
+  // Block submission when the requested threshold exceeds total signer weight.
+  const exceedsWeight = quorumPreview !== null && !quorumPreview.isFeasible
+
   const handleSave = async () => {
     if (!isValid || parsed === null) {
       setError("Threshold must be a positive integer")
+      return
+    }
+    if (exceedsWeight && quorumPreview !== null) {
+      setError(
+        `Threshold (${parsed}) exceeds total signer weight (${quorumPreview.totalWeightAvailable}). ` +
+          `The treasury would be permanently locked. Add more signers or choose a lower value.`,
+      )
       return
     }
 
@@ -197,7 +207,7 @@ export default function ThresholdConfig() {
         <button
           type="button"
           className="btn btn--primary threshold-form__save"
-          disabled={loading || saving || !isValid}
+          disabled={loading || saving || !isValid || exceedsWeight}
           onClick={() => void handleSave()}
         >
           {saving ? "Saving…" : "Save threshold"}

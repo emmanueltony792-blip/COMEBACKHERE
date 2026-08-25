@@ -8,6 +8,8 @@ import {
   nativeToScVal,
   SorobanRpc,
 } from "stellar-sdk"
+import { validateBody } from "../middleware/validate.js"
+import { allowBodySchema, blockBodySchema } from "../schemas/index.js"
 
 const router = Router()
 
@@ -29,19 +31,6 @@ function buildSorobanClient(rpcUrl: string): SorobanClient {
     simulateTransaction: (tx) => server.simulateTransaction(tx),
     sendTransaction: (tx) => server.sendTransaction(tx),
     getTransaction: (hash) => server.getTransaction(hash),
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Validation helpers
-// ---------------------------------------------------------------------------
-
-function isValidStellarAddress(addr: string): boolean {
-  try {
-    Keypair.fromPublicKey(addr)
-    return true
-  } catch {
-    return false
   }
 }
 
@@ -140,22 +129,14 @@ export interface AllowBody {
  * Body: { address: string, until?: number }
  * Returns: { address, status, hash }
  */
-router.post("/allow", async (req: Request, res: Response) => {
+router.post("/allow", validateBody(allowBodySchema), async (req: Request, res: Response) => {
   const adminKey = req.headers["x-admin-key"]
   if (!adminKey || adminKey !== process.env.ADMIN_KEY) {
     res.status(401).json({ error: "Unauthorized" })
     return
   }
 
-  const { address, until } = req.body as Partial<AllowBody>
-  if (!address || !isValidStellarAddress(address)) {
-    res.status(400).json({ error: "address must be a valid Stellar public key" })
-    return
-  }
-  if (until !== undefined && (typeof until !== "number" || !Number.isInteger(until) || until <= 0)) {
-    res.status(400).json({ error: "until must be a positive Unix timestamp" })
-    return
-  }
+  const { address, until } = req.body as { address: string; until?: number }
 
   const env = envOrError()
   if (!env) {
@@ -200,18 +181,14 @@ export interface BlockBody {
  * Body: { address: string }
  * Returns: { address, status, hash }
  */
-router.post("/block", async (req: Request, res: Response) => {
+router.post("/block", validateBody(blockBodySchema), async (req: Request, res: Response) => {
   const adminKey = req.headers["x-admin-key"]
   if (!adminKey || adminKey !== process.env.ADMIN_KEY) {
     res.status(401).json({ error: "Unauthorized" })
     return
   }
 
-  const { address } = req.body as Partial<BlockBody>
-  if (!address || !isValidStellarAddress(address)) {
-    res.status(400).json({ error: "address must be a valid Stellar public key" })
-    return
-  }
+  const { address } = req.body as { address: string }
 
   const env = envOrError()
   if (!env) {

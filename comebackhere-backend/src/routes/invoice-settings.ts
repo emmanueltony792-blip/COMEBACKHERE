@@ -7,6 +7,8 @@ import {
   submitContractCall,
   type SorobanClient,
 } from "../lib/soroban.js"
+import { validateBody } from "../middleware/validate.js"
+import { graceWindowSchema } from "../schemas/index.js"
 
 const router = Router()
 
@@ -32,8 +34,28 @@ function requireEnv(res: Response): {
 }
 
 /**
- * GET /api/invoice/grace-window
- * Returns the current grace window in seconds from the invoice contract.
+ * @openapi
+ * /api/invoice/grace-window:
+ *   get:
+ *     tags: [Invoice Settings]
+ *     summary: Get current invoice grace window
+ *     responses:
+ *       200:
+ *         description: Current grace window in seconds
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 grace_window_seconds:
+ *                   type: integer
+ *                   example: 86400
+ *       503:
+ *         description: Service misconfiguration
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.get("/grace-window", async (_req: Request, res: Response) => {
   const env = requireEnv(res)
@@ -91,19 +113,58 @@ export async function setGraceWindow(
   return { grace_window_seconds: graceWindowSeconds, tx_hash: txHash }
 }
 
-router.post("/grace-window", async (req: Request, res: Response) => {
+/**
+ * @openapi
+ * /api/invoice/grace-window:
+ *   post:
+ *     tags: [Invoice Settings]
+ *     summary: Update invoice grace window
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [grace_window_seconds]
+ *             properties:
+ *               grace_window_seconds:
+ *                 type: integer
+ *                 description: Positive integer (1–2592000 seconds / 30 days)
+ *                 example: 172800
+ *                 minimum: 1
+ *                 maximum: 2592000
+ *     responses:
+ *       200:
+ *         description: Grace window updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 grace_window_seconds:
+ *                   type: integer
+ *                   example: 172800
+ *                 tx_hash:
+ *                   type: string
+ *                   example: "abc123..."
+ *       400:
+ *         description: Validation error — grace_window_seconds out of range or wrong type
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       503:
+ *         description: Service misconfiguration
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post("/grace-window", validateBody(graceWindowSchema), async (req: Request, res: Response) => {
   const env = requireEnv(res)
   if (!env) return
 
-  const graceWindowSeconds = req.body?.grace_window_seconds
-  if (
-    typeof graceWindowSeconds !== "number" ||
-    !Number.isInteger(graceWindowSeconds) ||
-    graceWindowSeconds <= 0
-  ) {
-    res.status(400).json({ error: "grace_window_seconds must be a positive integer" })
-    return
-  }
+  const graceWindowSeconds = req.body.grace_window_seconds
 
   try {
     const result = await setGraceWindow(graceWindowSeconds, env)

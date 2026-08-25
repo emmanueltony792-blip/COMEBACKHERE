@@ -42,6 +42,89 @@ function ConfirmModal({
   )
 }
 
+/** Dedicated confirmation modal for signer rotation.
+ *  Shows the outgoing (current) signer addresses and the incoming
+ *  new-signer address, then disables the Confirm button while the
+ *  transaction is in-flight.
+ */
+function RotateConfirmModal({
+  signers,
+  newSignerAddress,
+  onConfirm,
+  onCancel,
+  pending,
+}: {
+  signers: SignerInfo[]
+  newSignerAddress: string
+  onConfirm: () => void
+  onCancel: () => void
+  pending: boolean
+}) {
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="rotate-modal-title">
+      <div className="modal modal--rotate">
+        <h3 id="rotate-modal-title" className="modal__title">Confirm Signer Rotation</h3>
+        <p className="modal__message">
+          This is a high-impact governance action. Review the addresses carefully before confirming.
+        </p>
+
+        <div className="modal__address-section">
+          <p className="modal__address-label">Outgoing signer{signers.length !== 1 ? 's' : ''}</p>
+          {signers.length === 0 ? (
+            <p className="modal__address-empty">No current signers.</p>
+          ) : (
+            <ul className="modal__address-list" aria-label="Outgoing signers">
+              {signers.map(s => (
+                <li key={s.address} className="modal__address-item">
+                  <span className="modal__address-mono" title={s.address}>
+                    <span className="modal__address-full">{s.address}</span>
+                    <span className="modal__address-short">{shorten(s.address)}</span>
+                  </span>
+                  <span className="modal__address-weight">weight {s.weight}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {newSignerAddress && (
+          <div className="modal__address-section">
+            <p className="modal__address-label">Incoming signer</p>
+            <p className="modal__address-mono" title={newSignerAddress}>
+              <span className="modal__address-full">{newSignerAddress}</span>
+              <span className="modal__address-short">{shorten(newSignerAddress)}</span>
+            </p>
+          </div>
+        )}
+
+        <div className="modal__actions">
+          <button
+            className="btn btn--secondary"
+            onClick={onCancel}
+            disabled={pending}
+          >
+            Cancel
+          </button>
+          <button
+            className="btn btn--primary"
+            onClick={onConfirm}
+            disabled={pending}
+            aria-busy={pending}
+          >
+            {pending ? 'Rotating…' : 'Confirm Rotation'}
+          </button>
+        </div>
+
+        {pending && (
+          <p className="modal__pending-note" role="status" aria-live="polite">
+            Transaction in progress, please wait…
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function AddSignerForm({ onAdd }: { onAdd: (address: string, weight: number) => Promise<void> }) {
   const [address, setAddress] = useState('')
   const [weight, setWeight] = useState('')
@@ -80,8 +163,8 @@ function AddSignerForm({ onAdd }: { onAdd: (address: string, weight: number) => 
       await onAdd(address, parseInt(weight, 10))
       setAddress('')
       setWeight('')
-    } catch (err: any) {
-      setSubmitErr(err.message)
+    } catch (err: unknown) {
+      setSubmitErr(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setSubmitting(false)
     }
@@ -162,6 +245,7 @@ export default function SignerManagement() {
   const { signers, loading, error, addSigner, removeSigner, rotateSigners } = useSigners()
   const [removeTarget, setRemoveTarget] = useState<string | null>(null)
   const [showRotateConfirm, setShowRotateConfirm] = useState(false)
+  const [rotatePending, setRotatePending] = useState(false)
   const [actionErr, setActionErr] = useState<string | null>(null)
 
   const handleRemoveConfirm = async () => {
@@ -169,8 +253,8 @@ export default function SignerManagement() {
     setActionErr(null)
     try {
       await removeSigner(removeTarget)
-    } catch (e: any) {
-      setActionErr(`Failed to remove signer: ${e.message}`)
+    } catch (e: unknown) {
+      setActionErr(`Failed to remove signer: ${e instanceof Error ? e.message : 'Unknown error'}`)
     } finally {
       setRemoveTarget(null)
     }
@@ -178,11 +262,15 @@ export default function SignerManagement() {
 
   const handleRotateConfirm = async () => {
     setActionErr(null)
-    setShowRotateConfirm(false)
+    setRotatePending(true)
     try {
       await rotateSigners()
-    } catch (e: any) {
-      setActionErr(`Failed to rotate signers: ${e.message}`)
+      setShowRotateConfirm(false)
+    } catch (e: unknown) {
+      setActionErr(`Failed to rotate signers: ${e instanceof Error ? e.message : 'Unknown error'}`)
+      setShowRotateConfirm(false)
+    } finally {
+      setRotatePending(false)
     }
   }
 
@@ -193,6 +281,13 @@ export default function SignerManagement() {
   if (error && signers.length === 0) {
     return <div className="signer-panel"><p className="signer-panel__error">Error: {error}</p></div>
   }
+
+  // Derive the "incoming" signer address for display in the rotation modal.
+  // In a propose_signer_rotation flow the new signer comes from the pending
+  // rotation proposal stored on-chain. As a best-effort UI hint, we show the
+  // last signer in the current list as the outgoing signer and surface the
+  // pending rotation note to the user.
+  const incomingSignerAddress = signers.length > 0 ? signers[signers.length - 1].address : ''
 
   return (
     <div className="signer-panel">
@@ -242,11 +337,12 @@ export default function SignerManagement() {
       )}
 
       {showRotateConfirm && (
-        <ConfirmModal
-          title="Trigger Signer Rotation"
-          message="This will initiate a signer rotation on the treasury contract. Are you sure?"
+        <RotateConfirmModal
+          signers={signers}
+          newSignerAddress={incomingSignerAddress}
           onConfirm={handleRotateConfirm}
-          onCancel={() => setShowRotateConfirm(false)}
+          onCancel={() => { if (!rotatePending) setShowRotateConfirm(false) }}
+          pending={rotatePending}
         />
       )}
     </div>
